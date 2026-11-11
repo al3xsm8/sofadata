@@ -1,0 +1,22 @@
+{
+  "name": "sofadata-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:pages": "powershell -NoProfile -Command \"$env:VITE_STATIC_DATA='true'; npm run build\"",
+    "preview": "vite preview",
+    "update:data": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/update-data.ps1"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.4.0",
+    "typescript": "~5.7.2",
+    "vite": "^6.1.0"
+  }
+}

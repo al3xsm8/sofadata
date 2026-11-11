@@ -1,0 +1,39 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Local data and generated files
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Frontend dependencies and build output
+node_modules/
+dist/
+.vite/
+
+# Tooling
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+Thumbs.db
+
+# External scraper checkout (kept separate from this application's repository)
+/sofascore_scraper-main/
+
+
