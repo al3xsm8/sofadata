@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.backend import models  # noqa: F401
 from app.backend.database import Base
 from app.backend.models import Competition, Match, Team, TeamMatchStatistics
-from app.backend.ingestion import import_event, import_jsonl
+from app.backend.ingestion import import_event, import_jsonl, import_raw_scraper_jsonl
 
 
 @pytest.fixture
@@ -232,3 +232,40 @@ def test_import_jsonl_rolls_back_on_invalid_event(session: Session, tmp_path) ->
         import_jsonl(session, events_path, slices_path)
     assert session.query(Match).count() == 0
     assert session.query(Team).count() == 0
+
+
+def test_import_raw_scraper_export_with_event_and_statistics(session: Session, tmp_path) -> None:
+    raw_path = tmp_path / "uefa-raw.jsonl"
+    event = {
+        "id": 777001,
+        "startTimestamp": 1792000000,
+        "status": {"type": "finished"},
+        "roundInfo": {"round": 1},
+        "tournament": {"uniqueTournament": {"id": 999, "name": "UEFA Champions League"}},
+        "season": {"id": 1234},
+        "homeTeam": {"id": 101, "name": "Home UCL"},
+        "awayTeam": {"id": 202, "name": "Away UCL"},
+        "homeScore": {"normaltime": 2, "period1": 1},
+        "awayScore": {"normaltime": 1, "period1": 0},
+    }
+    stats = {"statistics": [
+        {"period": period, "groups": [{"statisticsItems": [
+            {"key": "cornerKicks", "homeValue": home, "awayValue": away},
+            {"key": "totalShotsOnGoal", "homeValue": home + 4, "awayValue": away + 3},
+            {"key": "shotsOnGoal", "homeValue": home + 2, "awayValue": away + 1},
+            {"key": "yellowCards", "homeValue": 1, "awayValue": 2},
+            {"key": "redCards", "homeValue": 0, "awayValue": 0},
+        ]}]} for period, home, away in (("ALL", 5, 3), ("1ST", 2, 1), ("2ND", 3, 2))
+    ]}
+    raw_path.write_text("".join(json.dumps(row) + "\n" for row in (
+        {"event_id": 777001, "key": "event", "payload": event},
+        {"event_id": 777001, "key": "statistics", "payload": stats},
+    )), encoding="utf-8")
+
+    assert import_raw_scraper_jsonl(session, raw_path) == 1
+    match = session.query(Match).filter_by(source_id=777001).one()
+    home = next(row for row in match.team_statistics if row.is_home)
+    assert match.competition.name == "UEFA Champions League"
+    assert match.home_goals == 2 and match.away_goals == 1
+    assert home.corners == 5 and home.half_time_corners == 2 and home.second_half_corners == 3
+    assert home.cards_total == 1 and home.half_time_cards_total == 1

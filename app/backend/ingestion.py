@@ -220,3 +220,58 @@ def import_jsonl(session: Session, events_path: Path, slices_path: Path) -> int:
     except Exception:
         session.rollback()
         raise
+
+
+def import_raw_scraper_jsonl(session: Session, raw_path: Path) -> int:
+    """Import original-data JSONL exports produced by the local scraper platform."""
+    try:
+        events: dict[int, dict[str, Any]] = {}
+        slices: dict[int, dict[str, Any]] = {}
+        for record in read_jsonl(raw_path):
+            event_id = _as_int(record.get("event_id"))
+            key = record.get("key")
+            payload = record.get("payload")
+            if event_id is None or not isinstance(key, str) or not isinstance(payload, dict):
+                raise ValueError("Registro raw precisa conter event_id, key e payload objeto")
+            if key == "event":
+                events[event_id] = payload
+            elif key == "statistics":
+                slices.setdefault(event_id, {})["statistics"] = payload
+
+        if not events:
+            raise ValueError("O JSONL raw não contém registros event")
+
+        imported = 0
+        for event_id, payload in events.items():
+            start_timestamp = _as_int(payload.get("startTimestamp"))
+            if start_timestamp is None:
+                raise ValueError(f"Evento {event_id} não contém startTimestamp válido")
+            participants = {
+                "home": payload.get("homeTeam"),
+                "away": payload.get("awayTeam"),
+            }
+            home_score = payload.get("homeScore") or {}
+            away_score = payload.get("awayScore") or {}
+            status = payload.get("status") or {}
+            event = {
+                "id": event_id,
+                "tournament_id": ((payload.get("tournament") or {}).get("uniqueTournament") or {}).get("id"),
+                "season_id": (payload.get("season") or {}).get("id"),
+                "start_utc": datetime.fromtimestamp(start_timestamp, tz=timezone.utc).isoformat(),
+                "status": {"class": "completed" if status.get("type") == "finished" else status.get("type")},
+                "stage": {"name": ((payload.get("tournament") or {}).get("uniqueTournament") or {}).get("name")},
+                "round": {"number": (payload.get("roundInfo") or {}).get("round")},
+                "participants": participants,
+                "score": {
+                    "home": home_score.get("normaltime", home_score.get("current")),
+                    "away": away_score.get("normaltime", away_score.get("current")),
+                    "half_time": {"home": home_score.get("period1"), "away": away_score.get("period1")},
+                },
+            }
+            import_event(session, event, slices.get(event_id, {}))
+            imported += 1
+        session.commit()
+        return imported
+    except Exception:
+        session.rollback()
+        raise
