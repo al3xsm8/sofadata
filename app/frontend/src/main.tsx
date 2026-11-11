@@ -212,6 +212,7 @@ function App() {
       if (showErrors) setError(reason instanceof Error ? reason.message : 'Falha ao atualizar os dados.')
       else if (!snapshot) {
         try {
+          if (staticDataMode) throw new Error('O JSON público não respondeu.')
           const localResponse = await fetch('/api/data/matches.json', { cache: 'no-store' })
           if (!localResponse.ok) throw new Error()
           const localSnapshot = await localResponse.json() as MatchSnapshot

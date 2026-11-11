@@ -16,6 +16,8 @@ ENV/
 
 # Local data and generated files
 data/
+!app/frontend/public/data/
+!app/frontend/public/data/matches.json
 *.db
 *.sqlite
 *.sqlite3
