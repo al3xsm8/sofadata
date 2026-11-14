@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { createXlsx } from './xlsx'
 import './style.css'
 
 type TeamStatistics = {
@@ -141,6 +142,10 @@ function filterMatches(items: Match[], filters: Filters): Match[] {
   })
 }
 
+function formatAverage(total: number, count: number): string {
+  return count ? (total / count).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—'
+}
+
 function value(value: number | null | undefined) {
   return value ?? '—'
 }
@@ -154,7 +159,12 @@ function localDate(iso: string) {
 function App() {
   const [filters, setFilters] = useState<Filters>(emptyFilters)
   const [matches, setMatches] = useState<Match[]>([])
+  const [filteredMatches, setFilteredMatches] = useState<Match[]>([])
   const [teams, setTeams] = useState<TeamOption[]>([])
+  const [teamSearch, setTeamSearch] = useState('')
+  const [opponentSearch, setOpponentSearch] = useState('')
+  const [teamSuggestionsOpen, setTeamSuggestionsOpen] = useState(false)
+  const [opponentSuggestionsOpen, setOpponentSuggestionsOpen] = useState(false)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<Match | null>(null)
@@ -176,6 +186,7 @@ function App() {
   const [snapshot, setSnapshot] = useState<MatchSnapshot | null>(null)
   const [updatingData, setUpdatingData] = useState(false)
   const [dataMessage, setDataMessage] = useState('')
+  const [showAllInsights, setShowAllInsights] = useState(false)
   const pageSize = 20
 
   useEffect(() => {
@@ -232,11 +243,13 @@ function App() {
   useEffect(() => {
     if (!snapshot) return
     const filtered = filterMatches(snapshot.items, filters)
+    setFilteredMatches(filtered)
     setTotal(filtered.length)
     setMatches(filtered.slice(page * pageSize, (page + 1) * pageSize))
   }, [filters, page, snapshot])
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
+  const insightTeamCount = useMemo(() => new Set(filteredMatches.flatMap(match => match.team_statistics.map(stat => stat.team_id))).size, [filteredMatches])
   const orderedMatches = useMemo(() => [...matches].sort((a,b)=>{
     const getValue=(match:Match):string|number=>{
       if(sortKey==='date') return match.match_date
@@ -251,10 +264,65 @@ function App() {
     return sortAscending?cmp:-cmp
   }),[matches,sortKey,sortAscending])
   const summary = useMemo(() => `${total} ${total === 1 ? 'partida encontrada' : 'partidas encontradas'}`, [total])
+  const selectedTeam = teams.find(team => String(team.id) === filters.team)
+  const selectedOpponent = teams.find(team => String(team.id) === filters.opponent)
+  const teamSuggestions = teams.filter(team => team.name.toLocaleLowerCase('pt-BR').includes(teamSearch.trim().toLocaleLowerCase('pt-BR'))).slice(0, 8)
+  const opponentSuggestions = teams.filter(team => String(team.id) !== filters.team && team.name.toLocaleLowerCase('pt-BR').includes(opponentSearch.trim().toLocaleLowerCase('pt-BR'))).slice(0, 8)
+  const teamInsights = useMemo(() => {
+    const statsByTeam = new Map<number, {
+      id: number; name: string; played: number; wins: number; draws: number; losses: number;
+      goals: number; goalsCount: number; against: number; againstCount: number;
+      corners: number; cornersCount: number; cards: number; cardsCount: number;
+      shots: number; shotsCount: number; shotsOnTarget: number; shotsOnTargetCount: number
+    }>()
+    for (const match of filteredMatches) {
+      for (const stat of match.team_statistics) {
+        const row = statsByTeam.get(stat.team_id) ?? {
+          id: stat.team_id, name: stat.team_name, played: 0, wins: 0, draws: 0, losses: 0,
+          goals: 0, goalsCount: 0, against: 0, againstCount: 0, corners: 0, cornersCount: 0,
+          cards: 0, cardsCount: 0, shots: 0, shotsCount: 0, shotsOnTarget: 0, shotsOnTargetCount: 0,
+        }
+        row.played += 1
+        if (stat.result === 'Vitoria') row.wins += 1
+        else if (stat.result === 'Empate') row.draws += 1
+        else if (stat.result === 'Derrota') row.losses += 1
+        if (stat.goals !== null) { row.goals += stat.goals; row.goalsCount += 1 }
+        const against = stat.is_home ? match.away_goals : match.home_goals
+        if (against !== null) { row.against += against; row.againstCount += 1 }
+        if (stat.corners !== null) { row.corners += stat.corners; row.cornersCount += 1 }
+        if (stat.cards_total !== null) { row.cards += stat.cards_total; row.cardsCount += 1 }
+        if (stat.shots !== null) { row.shots += stat.shots; row.shotsCount += 1 }
+        if (stat.shots_on_target !== null) { row.shotsOnTarget += stat.shots_on_target; row.shotsOnTargetCount += 1 }
+        statsByTeam.set(stat.team_id, row)
+      }
+    }
+    const allTeams = [...statsByTeam.values()].sort((a, b) => b.played - a.played || a.name.localeCompare(b.name, 'pt-BR'))
+    if (filters.team) {
+      const included = new Set([filters.team, filters.opponent].filter(Boolean))
+      return allTeams.filter(team => included.has(String(team.id)))
+    }
+    return showAllInsights ? allTeams : allTeams.slice(0, 8)
+  }, [filteredMatches, filters.team, filters.opponent, showAllInsights])
 
   function update<K extends keyof Filters>(key: K, next: Filters[K]) {
     setFilters(current => ({ ...current, [key]: next }))
     setPage(0)
+  }
+
+  function chooseTeam(team: TeamOption | null) {
+    update('team', team ? String(team.id) : '')
+    if (!team || (filters.opponent && String(team.id) === filters.opponent)) {
+      update('opponent', '')
+      setOpponentSearch('')
+    }
+    setTeamSearch(team?.name ?? '')
+    setTeamSuggestionsOpen(false)
+  }
+
+  function chooseOpponent(team: TeamOption | null) {
+    update('opponent', team ? String(team.id) : '')
+    setOpponentSearch(team?.name ?? '')
+    setOpponentSuggestionsOpen(false)
   }
 
   function toggleColumn(key: ColumnKey) {
@@ -264,23 +332,16 @@ function App() {
   }
 
   async function exportExcel() {
-    if (staticDataMode) {
-      setError('A exportação Excel ainda requer o backend local; no GitHub Pages você pode consultar e filtrar os dados JSON.')
-      return
-    }
     setExporting(true)
     try {
-      const form = document.querySelector<HTMLFormElement>('.filter-panel form')
-      const values = form ? new FormData(form) : null
-      const current = (key: keyof Filters) => values?.get(key)?.toString().trim() ?? filters[key].trim()
-      const currentFilters = { ...filters }
-      ;(Object.keys(currentFilters) as (keyof Filters)[]).forEach(key => { currentFilters[key] = current(key) })
-      const selectedMatches = filterMatches(snapshot?.items ?? [], currentFilters)
-      const rows: (string | number | null)[][] = []
+      // Use the same React filter state that drives the visible table; the form
+      // inputs for team/opponent display names while the state stores their IDs.
+      const selectedMatches = filterMatches(snapshot?.items ?? [], filters)
+      const rows: (string | number | Date | null)[][] = []
       selectedMatches.forEach((match, matchIndex) => {
         for (const stat of [...match.team_statistics].sort((a, b) => Number(b.is_home) - Number(a.is_home))) {
           rows.push([
-            localDate(match.match_date), match.competition, matchIndex + 1, stat.team_name,
+            new Date(match.match_date), match.competition, matchIndex + 1, stat.team_name,
             stat.is_home ? match.away_team : match.home_team, stat.is_home ? 'Casa' : 'Fora', match.round,
             `${value(match.home_goals)} - ${value(match.away_goals)}`, stat.result,
             `${value(match.home_half_time_goals)} - ${value(match.away_half_time_goals)}`, stat.half_time_result,
@@ -292,27 +353,17 @@ function App() {
           ])
         }
       })
-      const params = new URLSearchParams()
-      if (current('from')) params.set('from', current('from'))
-      if (current('to')) params.set('to', current('to'))
-      if (current('competition')) params.set('competition', current('competition'))
-      if (current('team')) params.set('team_id', current('team'))
-      if (current('opponent')) params.set('opponent_id', current('opponent'))
-      if (current('venue') === 'home') params.set('is_home', 'true')
-      if (current('venue') === 'away') params.set('is_home', 'false')
-      if (current('round')) params.set('round', current('round'))
-      if (current('status')) params.set('status', current('status'))
-      const response = await fetch(`/api/matches/export.xlsx?${params}`)
-      if (!response.ok) throw new Error('Exportar Excel requer o backend local; no GitHub Pages use Baixar JSON para dados.')
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = 'sofadata-partidas.xlsx'
-      link.click()
-      URL.revokeObjectURL(url)
+
+      const headers = [
+        'Data', 'Campeonato', 'Ord', 'Time', 'Adversário', 'Local', 'Rodada', 'Placar', 'Resultado',
+        'Placar 1ºt', 'Resultado 1ºt', 'Placar 2ºt', 'Resultado 2ºt', 'Gol', 'Gol 1ºt', 'Gol 2ºt',
+        'Escanteios', 'Cartão', 'Chutes', 'Chutes Gol', 'Escanteios 1ºt', 'Cartão 1ºt', 'Chutes 1ºt',
+        'Chutes Gol 1ºt', 'Escanteios 2ºt', 'Cartão 2ºt', 'Chutes 2ºt', 'Chutes Gol 2ºt',
+      ]
+      if (rows.length === 0) throw new Error('Não há partidas correspondentes aos filtros para exportar.')
+      createXlsx(headers, rows)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Falha ao exportar Excel.')
+      setError(reason instanceof Error ? `Falha ao gerar Excel: ${reason.message}` : 'Falha ao gerar Excel.')
     } finally {
       setExporting(false)
     }
@@ -426,21 +477,82 @@ function App() {
 
       <section className="page-heading">
         <div>
-          <p className="eyebrow">ACERVO DE JOGOS</p>
+          <p className="eyebrow">SOFADATA · CENTRO DE JOGOS</p>
           <h1>Partidas</h1>
-          <p className="subtitle">Consulte resultados e estatísticas por equipe.</p>
+          <p className="subtitle">Resultados, números e contexto para acompanhar cada confronto.</p>
         </div>
-        <div className="heading-actions"><div className="match-count"><strong>{total}</strong><span>partidas</span></div><button className="table-settings" aria-label="Personalizar tabela" onClick={()=>setCustomizeOpen(true)}>⚙</button></div>
+        <div className="heading-actions"><div className="match-count"><strong>{total}</strong><span>partidas encontradas</span></div><button className="table-settings" aria-label="Personalizar tabela" onClick={()=>setCustomizeOpen(true)}>⚙</button></div>
       </section>
 
       <section className="filter-panel" aria-label="Filtros de partidas">
+        <div className="filter-panel-heading"><div><span className="panel-kicker">ENCONTRE UM JOGO</span><strong>Filtros</strong></div><span className="filter-hint">Combine campeonato, equipes e período</span></div>
         <form onSubmit={event => event.preventDefault()}>
         <div className="filter-grid">
           <label>Data inicial<input name="from" type="date" value={filters.from} onChange={e => update('from', e.target.value)} /></label>
           <label>Data final<input name="to" type="date" value={filters.to} onChange={e => update('to', e.target.value)} /></label>
           <label className="wide-field">Campeonato<input name="competition" placeholder="Ex.: Premier League" value={filters.competition} onChange={e => update('competition', e.target.value)} /></label>
-          <label>Time<select name="team" value={filters.team} onChange={e => {update('team',e.target.value);if(!e.target.value)update('opponent','')}}><option value="">Todos</option>{teams.map(team=><option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
-          <label>Adversário<select name="opponent" value={filters.opponent} onChange={e => update('opponent',e.target.value)} disabled={!filters.team}><option value="">Todos</option>{teams.filter(team=>String(team.id)!==filters.team).map(team=><option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
+          <label className="team-search-field">Time
+            <div className="team-search-control">
+              <input
+                name="team"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={teamSuggestionsOpen}
+                aria-controls="team-suggestions"
+                autoComplete="off"
+                placeholder="Pesquisar time…"
+                value={teamSearch}
+                onFocus={() => setTeamSuggestionsOpen(true)}
+                onChange={event => {
+                  const text = event.target.value
+                  setTeamSearch(text)
+                  setTeamSuggestionsOpen(true)
+                  if (filters.team) update('team', '')
+                  if (!text) { update('opponent', ''); setOpponentSearch('') }
+                }}
+                onKeyDown={event => {
+                  if (event.key === 'Escape') setTeamSuggestionsOpen(false)
+                  if (event.key === 'Enter' && teamSuggestions.length === 1) { event.preventDefault(); chooseTeam(teamSuggestions[0]) }
+                }}
+                onBlur={() => window.setTimeout(() => setTeamSuggestionsOpen(false), 120)}
+              />
+              {selectedTeam && <button type="button" className="team-search-clear" aria-label="Limpar time" onClick={() => chooseTeam(null)}>×</button>}
+              {teamSuggestionsOpen && <div className="team-suggestions" id="team-suggestions" role="listbox" aria-label="Times">
+                {teamSuggestions.length ? teamSuggestions.map(team => <button type="button" role="option" aria-selected={String(team.id) === filters.team} key={team.id} onMouseDown={event => event.preventDefault()} onClick={() => chooseTeam(team)}>{team.name}</button>) : <span className="no-team-suggestions">Nenhum time encontrado</span>}
+              </div>}
+            </div>
+          </label>
+          <label className={`team-search-field${!selectedTeam ? ' is-disabled' : ''}`}>Adversário
+            <div className="team-search-control">
+              <input
+                name="opponent"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={opponentSuggestionsOpen && Boolean(selectedTeam)}
+                aria-controls="opponent-suggestions"
+                autoComplete="off"
+                placeholder={selectedTeam ? 'Pesquisar adversário…' : 'Escolha um time primeiro'}
+                value={opponentSearch}
+                disabled={!selectedTeam}
+                onFocus={() => selectedTeam && setOpponentSuggestionsOpen(true)}
+                onChange={event => {
+                  const text = event.target.value
+                  setOpponentSearch(text)
+                  setOpponentSuggestionsOpen(true)
+                  if (filters.opponent) update('opponent', '')
+                }}
+                onKeyDown={event => {
+                  if (event.key === 'Escape') setOpponentSuggestionsOpen(false)
+                  if (event.key === 'Enter' && opponentSuggestions.length === 1) { event.preventDefault(); chooseOpponent(opponentSuggestions[0]) }
+                }}
+                onBlur={() => window.setTimeout(() => setOpponentSuggestionsOpen(false), 120)}
+              />
+              {selectedOpponent && <button type="button" className="team-search-clear" aria-label="Limpar adversário" onClick={() => chooseOpponent(null)}>×</button>}
+              {opponentSuggestionsOpen && selectedTeam && <div className="team-suggestions" id="opponent-suggestions" role="listbox" aria-label="Adversários">
+                {opponentSuggestions.length ? opponentSuggestions.map(team => <button type="button" role="option" aria-selected={String(team.id) === filters.opponent} key={team.id} onMouseDown={event => event.preventDefault()} onClick={() => chooseOpponent(team)}>{team.name}</button>) : <span className="no-team-suggestions">Nenhum adversário encontrado</span>}
+              </div>}
+            </div>
+          </label>
           <label>Local<select name="venue" value={filters.venue} onChange={e => update('venue', e.target.value)}><option value="">Todos</option><option value="home">Casa</option><option value="away">Fora</option></select></label>
           <label>Rodada<input name="round" type="number" min="1" placeholder="Todas" value={filters.round} onChange={e => update('round', e.target.value)} /></label>
           <label>Status<select name="status" value={filters.status} onChange={e => update('status', e.target.value)}><option value="">Todos</option><option value="completed">Finalizada</option><option value="live">Ao vivo</option><option value="not_started">Não iniciada</option><option value="void">Cancelada/adiada</option></select></label>
@@ -449,7 +561,7 @@ function App() {
         </form>
       </section>
 
-      <div className="results-line"><span>{summary}{snapshot?.generated_at ? ` · JSON de ${localDate(snapshot.generated_at)}` : ''}{dataMessage ? ` · ${dataMessage}` : ''}</span><span>Datas exibidas no seu horário local <button className="export-button" onClick={()=>void exportExcel()} disabled={exporting||total===0}>{exporting?'Exportando…':'Exportar Excel'}</button></span></div>
+      <div className="results-line"><div className="results-meta"><span className="results-dot"/><strong>{summary}</strong>{snapshot?.generated_at && <span className="snapshot-meta">Atualizado {localDate(snapshot.generated_at)}</span>}{dataMessage && <span className="snapshot-message">{dataMessage}</span>}</div><div className="results-actions"><span>Horário local</span><button className="export-button" onClick={()=>void exportExcel()} disabled={exporting||total===0}>{exporting?'Preparando…':'⇩  Exportar Excel'}</button></div></div>
 
       {error && <div className="notice error-notice" role="alert">{error}</div>}
       {loading && <div className="notice">Carregando partidas…</div>}
@@ -469,6 +581,27 @@ function App() {
         <span>Página {page + 1} de {pageCount}</span>
         <button disabled={page + 1 >= pageCount} onClick={() => setPage(page + 1)}>Próxima →</button>
       </nav>}
+
+      <section className="insights-section" aria-label="Insights dos times filtrados">
+        <div className="insights-heading">
+          <div><span className="panel-kicker">LEITURA DO RECORTE</span><h2>Insights dos times</h2><p>Médias calculadas em todas as partidas filtradas; dados ausentes não entram no cálculo.</p></div>
+          <div className="insights-heading-actions"><span className="insights-sample">{filteredMatches.length} {filteredMatches.length === 1 ? 'partida na amostra' : 'partidas na amostra'}</span>{!filters.team && insightTeamCount > 8 && <button type="button" className="insights-toggle" onClick={() => setShowAllInsights(current => !current)}>{showAllInsights ? 'Mostrar menos' : 'Ver todos os times'}</button>}</div>
+        </div>
+        {teamInsights.length ? <div className="insights-grid">
+          {teamInsights.map(team => <article className="insight-card" key={team.id}>
+            <div className="insight-card-top"><div><span className="insight-team-tag">TIME</span><h3>{team.name}</h3></div><span className="insight-played">{team.played} {team.played === 1 ? 'jogo' : 'jogos'}</span></div>
+            <div className="insight-record" aria-label="Vitórias, empates e derrotas"><span className="win">{team.wins}V</span><span className="draw">{team.draws}E</span><span className="loss">{team.losses}D</span></div>
+            <div className="insight-metrics">
+              <div><span>Gols pró</span><strong>{formatAverage(team.goals, team.goalsCount)}</strong><small>{team.goalsCount}/{team.played} jogos</small></div>
+              <div><span>Gols contra</span><strong>{formatAverage(team.against, team.againstCount)}</strong><small>{team.againstCount}/{team.played} jogos</small></div>
+              <div><span>Escanteios</span><strong>{formatAverage(team.corners, team.cornersCount)}</strong><small>{team.cornersCount}/{team.played} jogos</small></div>
+              <div><span>Cartões</span><strong>{formatAverage(team.cards, team.cardsCount)}</strong><small>{team.cardsCount}/{team.played} jogos</small></div>
+              <div><span>Chutes</span><strong>{formatAverage(team.shots, team.shotsCount)}</strong><small>{team.shotsCount}/{team.played} jogos</small></div>
+              <div><span>Chutes no gol</span><strong>{formatAverage(team.shotsOnTarget, team.shotsOnTargetCount)}</strong><small>{team.shotsOnTargetCount}/{team.played} jogos</small></div>
+            </div>
+          </article>)}
+        </div> : <div className="insights-empty">Selecione um time ou ajuste os filtros para gerar insights.</div>}
+      </section>
 
       {selected && <div className="modal-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setSelected(null) }}>
         <section className="details-modal" role="dialog" aria-modal="true" aria-labelledby="detail-title">

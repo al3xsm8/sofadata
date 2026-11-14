@@ -11,6 +11,7 @@
     "update:data": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/update-data.ps1"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
