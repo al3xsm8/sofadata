@@ -88,7 +88,7 @@ type Filters = {
   from: string
   to: string
   competition: string
-  team: string
+  team: string[]
   opponent: string
   venue: string
   round: string
@@ -96,10 +96,10 @@ type Filters = {
 }
 
 const columns = [
-  ['date', 'Data', false], ['competition', 'Campeonato', false], ['ord', 'Ord', true], ['team', 'Time', true], ['opponent', 'Adversario', true], ['venue', 'Local', true], ['round', 'Rodada', true],
-  ['score', 'Placar', true], ['result', 'Resultado', true],
-  ['halfScore', 'Placar 1ºt', true], ['halfResult', 'Resultado 1ºt', true], ['secondScore', 'Placar 2ºt', true],
-  ['secondResult', 'Resultado 2ºt', true], ['goals', 'Gol', true], ['halfGoals', 'Gol 1ºt', true], ['secondGoals', 'Gol 2ºt', true],
+  ['date', 'Data', false], ['competition', 'Campeonato', false], ['ord', 'Ord', true], ['homeTeam', 'Time', true], ['awayTeam', 'Adversário', true], ['round', 'Rodada', true],
+  ['score', 'Resultado', true], ['fullScore', 'Placar', true], ['halfScore', 'Placar 1ºt', true], ['halfResult', 'Resultado 1ºt', true],
+  ['secondScore', 'Placar 2ºt', true], ['secondResult', 'Resultado 2ºt', true],
+  ['goals', 'Gol', true], ['halfGoals', 'Gol 1ºt', true], ['secondGoals', 'Gol 2ºt', true],
   ['corners', 'Escanteios', true], ['cards', 'Cartões', true], ['shots', 'Chutes', true], ['shotsOnTarget', 'Chutes no Gol', true],
   ['halfCorners', 'Escanteios 1ºt', true], ['halfCards', 'Cartões 1ºt', true], ['halfShots', 'Chutes 1ºt', true],
   ['halfShotsOnTarget', 'Chutes no Gol 1ºt', true], ['secondCorners', 'Escanteios 2ºt', true], ['secondCards', 'Cartões 2ºt', true],
@@ -107,9 +107,10 @@ const columns = [
 ] as const
 type ColumnKey = (typeof columns)[number][0]
 const defaultColumns: ColumnKey[] = columns.filter(([, , defaultVisible]) => defaultVisible !== false).map(([key]) => key)
+const columnKeySet = new Set<string>(columns.map(([key]) => key))
 
 const emptyFilters: Filters = {
-  from: '', to: '', competition: '', team: '', opponent: '', venue: '', round: '', status: '',
+  from: '', to: '', competition: '', team: [], opponent: '', venue: '', round: '', status: '',
 }
 
 const dataUrl = import.meta.env.VITE_DATA_URL || `${import.meta.env.BASE_URL}data/matches.json`
@@ -131,19 +132,51 @@ function filterMatches(items: Match[], filters: Filters): Match[] {
     if (query && !(match.competition ?? '').toLocaleLowerCase('pt-BR').includes(query)) return false
     if (filters.round && match.round !== Number(filters.round)) return false
     if (filters.status && match.status !== filters.status) return false
-    const teamStat = filters.team
-      ? match.team_statistics.find(stat => String(stat.team_id) === filters.team)
-      : undefined
-    if (filters.team && !teamStat) return false
-    if (filters.opponent && !match.team_statistics.some(stat => String(stat.team_id) === filters.opponent && stat.team_id !== teamStat?.team_id)) return false
-    if (filters.venue === 'home' && teamStat && !teamStat.is_home) return false
-    if (filters.venue === 'away' && teamStat && teamStat.is_home) return false
+    const matchingTeamStats = filters.team.length
+      ? match.team_statistics.filter(stat => filters.team.includes(String(stat.team_id)))
+      : []
+    if (filters.team.length && matchingTeamStats.length === 0) return false
+    const referenceStat = matchingTeamStats[0]
+    if (filters.opponent && !match.team_statistics.some(stat => String(stat.team_id) === filters.opponent && !filters.team.includes(String(stat.team_id)))) return false
+    if (filters.venue && !filters.team.length) return false
+    if (filters.venue === 'home' && !matchingTeamStats.some(stat => stat.is_home)) return false
+    if (filters.venue === 'away' && !matchingTeamStats.some(stat => !stat.is_home)) return false
     return true
+  })
+}
+
+function sortMatches(items: Match[], sortKey: ColumnKey, ascending: boolean, filters: Filters): Match[] {
+  const getValue = (match: Match): string | number => {
+    if (sortKey === 'date') return match.match_date
+    if (sortKey === 'competition') return match.competition ?? ''
+    if (sortKey === 'ord' || sortKey === 'round') return match.round ?? -1
+    if (sortKey === 'score' || sortKey === 'fullScore') return (match.home_goals ?? -1) - (match.away_goals ?? -1)
+    if (sortKey === 'homeTeam') {
+      const selected = match.team_statistics.find(stat => filters.team.includes(String(stat.team_id)) && (filters.venue !== 'away' ? stat.is_home : !stat.is_home))
+      return selected?.team_name ?? (filters.venue === 'away' ? match.away_team : match.home_team)
+    }
+    if (sortKey === 'awayTeam') {
+      if (filters.opponent) return match.team_statistics.find(stat => String(stat.team_id) === filters.opponent)?.team_name ?? ''
+      const selected = match.team_statistics.find(stat => filters.team.includes(String(stat.team_id)) && (filters.venue !== 'away' ? stat.is_home : !stat.is_home))
+      return selected ? (selected.is_home ? match.away_team : match.home_team) : (filters.venue === 'away' ? match.home_team : match.away_team)
+    }
+    return match.home_team
+  }
+  return [...items].sort((a, b) => {
+    const av = getValue(a), bv = getValue(b)
+    const comparison = typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av).localeCompare(String(bv), 'pt-BR')
+    return ascending ? comparison : -comparison
   })
 }
 
 function formatAverage(total: number, count: number): string {
   return count ? (total / count).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—'
+}
+
+function resultLabel(homeGoals: number | null, awayGoals: number | null, homeTeam: string, awayTeam: string): string {
+  if (homeGoals === null || awayGoals === null) return '—'
+  if (homeGoals === awayGoals) return 'Empate | —'
+  return homeGoals > awayGoals ? `Vitoria | ${homeTeam}` : `Vitoria | ${awayTeam}`
 }
 
 function value(value: number | null | undefined) {
@@ -174,7 +207,9 @@ function App() {
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(() => {
     try {
       const saved = localStorage.getItem('sofadata-visible-columns')
-      return saved ? JSON.parse(saved) as ColumnKey[] : defaultColumns
+      if (!saved) return defaultColumns
+      const valid = (JSON.parse(saved) as string[]).filter((key): key is ColumnKey => columnKeySet.has(key))
+      return valid.length ? valid : defaultColumns
     } catch { return defaultColumns }
   })
   const [customizeOpen, setCustomizeOpen] = useState(false)
@@ -250,24 +285,13 @@ function App() {
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const insightTeamCount = useMemo(() => new Set(filteredMatches.flatMap(match => match.team_statistics.map(stat => stat.team_id))).size, [filteredMatches])
-  const orderedMatches = useMemo(() => [...matches].sort((a,b)=>{
-    const getValue=(match:Match):string|number=>{
-      if(sortKey==='date') return match.match_date
-      if(sortKey==='competition') return match.competition??''
-      if(sortKey==='ord') return match.round??-1
-      if(sortKey==='round') return match.round??-1
-      if(sortKey==='score') return (match.home_goals??-1)-(match.away_goals??-1)
-      return match.home_team
-    }
-    const av=getValue(a),bv=getValue(b)
-    const cmp=typeof av==='number'&&typeof bv==='number'?av-bv:String(av).localeCompare(String(bv),'pt-BR')
-    return sortAscending?cmp:-cmp
-  }),[matches,sortKey,sortAscending])
+  const orderedMatches = useMemo(() => sortMatches(matches, sortKey, sortAscending, filters), [matches, sortKey, sortAscending, filters])
   const summary = useMemo(() => `${total} ${total === 1 ? 'partida encontrada' : 'partidas encontradas'}`, [total])
-  const selectedTeam = teams.find(team => String(team.id) === filters.team)
+  const selectedTeams = teams.filter(team => filters.team.includes(String(team.id)))
+  const selectedTeam = selectedTeams[0]
   const selectedOpponent = teams.find(team => String(team.id) === filters.opponent)
-  const teamSuggestions = teams.filter(team => team.name.toLocaleLowerCase('pt-BR').includes(teamSearch.trim().toLocaleLowerCase('pt-BR'))).slice(0, 8)
-  const opponentSuggestions = teams.filter(team => String(team.id) !== filters.team && team.name.toLocaleLowerCase('pt-BR').includes(opponentSearch.trim().toLocaleLowerCase('pt-BR'))).slice(0, 8)
+  const teamSuggestions = teams.filter(team => !filters.team.includes(String(team.id)) && team.name.toLocaleLowerCase('pt-BR').includes(teamSearch.trim().toLocaleLowerCase('pt-BR'))).slice(0, 8)
+  const opponentSuggestions = teams.filter(team => !filters.team.includes(String(team.id)) && team.name.toLocaleLowerCase('pt-BR').includes(opponentSearch.trim().toLocaleLowerCase('pt-BR'))).slice(0, 8)
   const teamInsights = useMemo(() => {
     const statsByTeam = new Map<number, {
       id: number; name: string; played: number; wins: number; draws: number; losses: number;
@@ -297,8 +321,8 @@ function App() {
       }
     }
     const allTeams = [...statsByTeam.values()].sort((a, b) => b.played - a.played || a.name.localeCompare(b.name, 'pt-BR'))
-    if (filters.team) {
-      const included = new Set([filters.team, filters.opponent].filter(Boolean))
+    if (filters.team.length > 0) {
+      const included = new Set([...filters.team, filters.opponent].filter(Boolean))
       return allTeams.filter(team => included.has(String(team.id)))
     }
     return showAllInsights ? allTeams : allTeams.slice(0, 8)
@@ -310,13 +334,28 @@ function App() {
   }
 
   function chooseTeam(team: TeamOption | null) {
-    update('team', team ? String(team.id) : '')
-    if (!team || (filters.opponent && String(team.id) === filters.opponent)) {
-      update('opponent', '')
-      setOpponentSearch('')
+    if (team) {
+      setFilters(current => current.team.includes(String(team.id))
+        ? current
+        : { ...current, team: [...current.team, String(team.id)] })
+      setPage(0)
     }
-    setTeamSearch(team?.name ?? '')
+    setTeamSearch('')
     setTeamSuggestionsOpen(false)
+  }
+
+  function removeTeam(teamId: string) {
+    setFilters(current => {
+      const next = current.team.filter(id => id !== teamId)
+      return {
+        ...current,
+        team: next,
+        opponent: current.opponent === teamId ? '' : current.opponent,
+        venue: next.length === 0 ? '' : current.venue,
+      }
+    })
+    setPage(0)
+    if (filters.opponent === teamId) setOpponentSearch('')
   }
 
   function chooseOpponent(team: TeamOption | null) {
@@ -336,29 +375,35 @@ function App() {
     try {
       // Use the same React filter state that drives the visible table; the form
       // inputs for team/opponent display names while the state stores their IDs.
-      const selectedMatches = filterMatches(snapshot?.items ?? [], filters)
+      const selectedMatches = sortMatches(filterMatches(snapshot?.items ?? [], filters), sortKey, sortAscending, filters)
       const rows: (string | number | Date | null)[][] = []
       selectedMatches.forEach((match, matchIndex) => {
-        for (const stat of [...match.team_statistics].sort((a, b) => Number(b.is_home) - Number(a.is_home))) {
-          rows.push([
-            new Date(match.match_date), match.competition, matchIndex + 1, stat.team_name,
-            stat.is_home ? match.away_team : match.home_team, stat.is_home ? 'Casa' : 'Fora', match.round,
-            `${value(match.home_goals)} - ${value(match.away_goals)}`, stat.result,
-            `${value(match.home_half_time_goals)} - ${value(match.away_half_time_goals)}`, stat.half_time_result,
-            `${value(match.home_second_half_goals)} - ${value(match.away_second_half_goals)}`, stat.second_half_result,
-            stat.goals, stat.half_time_goals, stat.second_half_goals, stat.corners, stat.cards_total,
-            stat.shots, stat.shots_on_target, stat.half_time_corners, stat.half_time_cards_total,
-            stat.half_time_shots, stat.half_time_shots_on_target, stat.second_half_corners,
-            stat.second_half_cards_total, stat.second_half_shots, stat.second_half_shots_on_target,
-          ])
-        }
+        const home = match.team_statistics.find(stat => stat.is_home)
+        const away = match.team_statistics.find(stat => !stat.is_home)
+        const total = (homeValue: number | null | undefined, awayValue: number | null | undefined) => homeValue === null || homeValue === undefined || awayValue === null || awayValue === undefined ? null : homeValue + awayValue
+        const finalOutcome = resultLabel(match.home_goals, match.away_goals, match.home_team, match.away_team)
+        const firstHalfOutcome = resultLabel(match.home_half_time_goals, match.away_half_time_goals, match.home_team, match.away_team)
+        const secondHalfOutcome = resultLabel(match.home_second_half_goals, match.away_second_half_goals, match.home_team, match.away_team)
+        rows.push([
+          new Date(match.match_date), match.competition, matchIndex + 1, match.home_team, match.away_team,
+          match.round, finalOutcome,
+          `${value(match.home_goals)} - ${value(match.away_goals)}`,
+          `${value(match.home_half_time_goals)} - ${value(match.away_half_time_goals)}`, firstHalfOutcome,
+          `${value(match.home_second_half_goals)} - ${value(match.away_second_half_goals)}`, secondHalfOutcome,
+          total(home?.goals, away?.goals), total(home?.half_time_goals, away?.half_time_goals), total(home?.second_half_goals, away?.second_half_goals),
+          total(home?.corners, away?.corners), total(home?.cards_total, away?.cards_total),
+          total(home?.shots, away?.shots), total(home?.shots_on_target, away?.shots_on_target),
+          total(home?.half_time_corners, away?.half_time_corners), total(home?.half_time_cards_total, away?.half_time_cards_total),
+          total(home?.half_time_shots, away?.half_time_shots), total(home?.half_time_shots_on_target, away?.half_time_shots_on_target),
+          total(home?.second_half_corners, away?.second_half_corners), total(home?.second_half_cards_total, away?.second_half_cards_total),
+          total(home?.second_half_shots, away?.second_half_shots), total(home?.second_half_shots_on_target, away?.second_half_shots_on_target),
+        ])
       })
 
       const headers = [
-        'Data', 'Campeonato', 'Ord', 'Time', 'Adversário', 'Local', 'Rodada', 'Placar', 'Resultado',
-        'Placar 1ºt', 'Resultado 1ºt', 'Placar 2ºt', 'Resultado 2ºt', 'Gol', 'Gol 1ºt', 'Gol 2ºt',
-        'Escanteios', 'Cartão', 'Chutes', 'Chutes Gol', 'Escanteios 1ºt', 'Cartão 1ºt', 'Chutes 1ºt',
-        'Chutes Gol 1ºt', 'Escanteios 2ºt', 'Cartão 2ºt', 'Chutes 2ºt', 'Chutes Gol 2ºt',
+        'Data', 'Campeonato', 'Ord', 'Time', 'Adversário', 'Rodada', 'Resultado', 'Placar', 'Placar 1ºt', 'Resultado 1ºt',
+        'Placar 2ºt', 'Resultado 2ºt', 'Gol', 'Gol 1ºt', 'Gol 2ºt', 'Escanteios', 'Cartões', 'Chutes', 'Chutes no Gol',
+        'Escanteios 1ºt', 'Cartões 1ºt', 'Chutes 1ºt', 'Chutes no Gol 1ºt', 'Escanteios 2ºt', 'Cartões 2ºt', 'Chutes 2ºt', 'Chutes no Gol 2ºt',
       ]
       if (rows.length === 0) throw new Error('Não há partidas correspondentes aos filtros para exportar.')
       createXlsx(headers, rows)
@@ -369,55 +414,52 @@ function App() {
     }
   }
 
-  function rowValue(match: Match, stat: TeamStatistics, key: ColumnKey): string | number {
-    const opponent = stat.is_home ? match.away_team : match.home_team
-    const opposite = (home: number | null, away: number | null) => stat.is_home ? home : away
-    const score = (home: number | null, away: number | null) => `${value(home)} - ${value(away)}`
+  function rowValue(match: Match, key: ColumnKey, matchIndex: number): string | number {
+    const home = match.team_statistics.find(stat => stat.is_home)
+    const away = match.team_statistics.find(stat => !stat.is_home)
+    const score = (homeGoals: number | null, awayGoals: number | null) => `${value(homeGoals)} - ${value(awayGoals)}`
+    const total = (homeValue: number | null | undefined, awayValue: number | null | undefined) => homeValue === null || homeValue === undefined || awayValue === null || awayValue === undefined ? '—' : homeValue + awayValue
     switch (key) {
-      case 'ord': return ''
+      case 'ord': return page * pageSize + matchIndex + 1
       case 'date': return localDate(match.match_date)
       case 'competition': return match.competition ?? '—'
-      case 'team': return stat.team_name
-      case 'opponent': return opponent
-      case 'venue': return stat.is_home ? 'Casa' : 'Fora'
-      case 'round': return value(match.round)
-      case 'score': return score(match.home_goals, match.away_goals)
-      case 'result': return stat.result ?? '—'
-      case 'halfScore': return score(match.home_half_time_goals, match.away_half_time_goals)
-      case 'halfResult': return stat.half_time_result ?? '—'
-      case 'secondScore': return score(match.home_second_half_goals, match.away_second_half_goals)
-      case 'secondResult': return stat.second_half_result ?? '—'
-      case 'goals': return value(stat.goals)
-      case 'halfGoals': return value(stat.half_time_goals)
-      case 'secondGoals': return value(stat.second_half_goals)
-      case 'corners': return value(stat.corners)
-      case 'cards': return value(stat.cards_total)
-      case 'shots': return value(stat.shots)
-      case 'shotsOnTarget': return value(stat.shots_on_target)
-      case 'halfCorners': return value(stat.half_time_corners)
-      case 'halfCards': return value(stat.half_time_cards_total)
-      case 'halfShots': return value(stat.half_time_shots)
-      case 'halfShotsOnTarget': return value(stat.half_time_shots_on_target)
-      case 'secondCorners': return value(stat.second_half_corners)
-      case 'secondCards': return value(stat.second_half_cards_total)
-      case 'secondShots': return value(stat.second_half_shots)
-      case 'secondShotsOnTarget': return value(stat.second_half_shots_on_target)
-      default: return String(opposite(match.home_goals, match.away_goals) ?? '—')
+      case 'homeTeam': return match.home_team
+      case 'awayTeam': return match.away_team
+       case 'round': return value(match.round)
+      case 'score': return resultLabel(match.home_goals, match.away_goals, match.home_team, match.away_team)
+      case 'fullScore': return score(match.home_goals, match.away_goals)
+      case 'halfScore': return `${home?.half_time_goals ?? '—'} - ${away?.half_time_goals ?? '—'}`
+      case 'halfResult': return resultLabel(match.home_half_time_goals, match.away_half_time_goals, match.home_team, match.away_team)
+      case 'secondScore': return `${home?.second_half_goals ?? '—'} - ${away?.second_half_goals ?? '—'}`
+      case 'secondResult': return resultLabel(match.home_second_half_goals, match.away_second_half_goals, match.home_team, match.away_team)
+      case 'goals': return total(home?.goals, away?.goals)
+      case 'halfGoals': return total(home?.half_time_goals, away?.half_time_goals)
+      case 'secondGoals': return total(home?.second_half_goals, away?.second_half_goals)
+      case 'corners': return total(home?.corners, away?.corners)
+      case 'cards': return total(home?.cards_total, away?.cards_total)
+      case 'shots': return total(home?.shots, away?.shots)
+      case 'shotsOnTarget': return total(home?.shots_on_target, away?.shots_on_target)
+      case 'halfCorners': return total(home?.half_time_corners, away?.half_time_corners)
+      case 'halfCards': return total(home?.half_time_cards_total, away?.half_time_cards_total)
+      case 'halfShots': return total(home?.half_time_shots, away?.half_time_shots)
+      case 'halfShotsOnTarget': return total(home?.half_time_shots_on_target, away?.half_time_shots_on_target)
+      case 'secondCorners': return total(home?.second_half_corners, away?.second_half_corners)
+      case 'secondCards': return total(home?.second_half_cards_total, away?.second_half_cards_total)
+      case 'secondShots': return total(home?.second_half_shots, away?.second_half_shots)
+      case 'secondShotsOnTarget': return total(home?.second_half_shots_on_target, away?.second_half_shots_on_target)
     }
   }
 
   async function openDetails(match: Match) {
-    if (staticDataMode) {
-      setSelected({ ...match, analysis: match.analysis ?? null })
-      return
-    }
+    const snapshotMatch = snapshot?.items.find(item => item.id === match.id) ?? match
+    setSelected({ ...snapshotMatch, analysis: snapshotMatch.analysis ?? null })
+    if (staticDataMode) return
     try {
       setAnalysisLoading(true)
       const response = await fetch(detailUrl(match.id, analysisWindow, analysisN))
-      if (!response.ok) throw new Error('Não foi possível carregar os detalhes.')
-      setSelected(await response.json() as Match)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Não foi possível carregar os detalhes.')
+      if (response.ok) setSelected(await response.json() as Match)
+    } catch {
+      // Basic match details are already available from the JSON snapshot.
     } finally {
       setAnalysisLoading(false)
     }
@@ -507,8 +549,6 @@ function App() {
                   const text = event.target.value
                   setTeamSearch(text)
                   setTeamSuggestionsOpen(true)
-                  if (filters.team) update('team', '')
-                  if (!text) { update('opponent', ''); setOpponentSearch('') }
                 }}
                 onKeyDown={event => {
                   if (event.key === 'Escape') setTeamSuggestionsOpen(false)
@@ -516,25 +556,25 @@ function App() {
                 }}
                 onBlur={() => window.setTimeout(() => setTeamSuggestionsOpen(false), 120)}
               />
-              {selectedTeam && <button type="button" className="team-search-clear" aria-label="Limpar time" onClick={() => chooseTeam(null)}>×</button>}
+              {selectedTeams.length > 0 && <div className="selected-team-chips">{selectedTeams.map(team => <span className="selected-team-chip" key={team.id}>{team.name}<button type="button" aria-label={`Remover ${team.name}`} onClick={() => removeTeam(String(team.id))}>×</button></span>)}</div>}
               {teamSuggestionsOpen && <div className="team-suggestions" id="team-suggestions" role="listbox" aria-label="Times">
-                {teamSuggestions.length ? teamSuggestions.map(team => <button type="button" role="option" aria-selected={String(team.id) === filters.team} key={team.id} onMouseDown={event => event.preventDefault()} onClick={() => chooseTeam(team)}>{team.name}</button>) : <span className="no-team-suggestions">Nenhum time encontrado</span>}
+                {teamSuggestions.length ? teamSuggestions.map(team => <button type="button" role="option" aria-selected={false} key={team.id} onMouseDown={event => event.preventDefault()} onClick={() => chooseTeam(team)}>{team.name}</button>) : <span className="no-team-suggestions">Nenhum time encontrado</span>}
               </div>}
             </div>
           </label>
-          <label className={`team-search-field${!selectedTeam ? ' is-disabled' : ''}`}>Adversário
+          <label className={`team-search-field${!filters.team.length ? ' is-disabled' : ''}`}>Adversário
             <div className="team-search-control">
               <input
                 name="opponent"
                 role="combobox"
                 aria-autocomplete="list"
-                aria-expanded={opponentSuggestionsOpen && Boolean(selectedTeam)}
+                aria-expanded={opponentSuggestionsOpen && filters.team.length > 0}
                 aria-controls="opponent-suggestions"
                 autoComplete="off"
-                placeholder={selectedTeam ? 'Pesquisar adversário…' : 'Escolha um time primeiro'}
+                placeholder={filters.team.length ? 'Pesquisar adversário…' : 'Escolha um time primeiro'}
                 value={opponentSearch}
-                disabled={!selectedTeam}
-                onFocus={() => selectedTeam && setOpponentSuggestionsOpen(true)}
+                disabled={!filters.team.length}
+                onFocus={() => filters.team.length && setOpponentSuggestionsOpen(true)}
                 onChange={event => {
                   const text = event.target.value
                   setOpponentSearch(text)
@@ -548,12 +588,12 @@ function App() {
                 onBlur={() => window.setTimeout(() => setOpponentSuggestionsOpen(false), 120)}
               />
               {selectedOpponent && <button type="button" className="team-search-clear" aria-label="Limpar adversário" onClick={() => chooseOpponent(null)}>×</button>}
-              {opponentSuggestionsOpen && selectedTeam && <div className="team-suggestions" id="opponent-suggestions" role="listbox" aria-label="Adversários">
+              {opponentSuggestionsOpen && filters.team.length > 0 && <div className="team-suggestions" id="opponent-suggestions" role="listbox" aria-label="Adversários">
                 {opponentSuggestions.length ? opponentSuggestions.map(team => <button type="button" role="option" aria-selected={String(team.id) === filters.opponent} key={team.id} onMouseDown={event => event.preventDefault()} onClick={() => chooseOpponent(team)}>{team.name}</button>) : <span className="no-team-suggestions">Nenhum adversário encontrado</span>}
               </div>}
             </div>
           </label>
-          <label>Local<select name="venue" value={filters.venue} onChange={e => update('venue', e.target.value)}><option value="">Todos</option><option value="home">Casa</option><option value="away">Fora</option></select></label>
+          <label>Local<select name="venue" value={filters.venue} onChange={e => update('venue', e.target.value)} disabled={!filters.team.length}><option value="">{filters.team.length ? 'Todos' : 'Selecione um time'}</option><option value="home">Casa</option><option value="away">Fora</option></select></label>
           <label>Rodada<input name="round" type="number" min="1" placeholder="Todas" value={filters.round} onChange={e => update('round', e.target.value)} /></label>
           <label>Status<select name="status" value={filters.status} onChange={e => update('status', e.target.value)}><option value="">Todos</option><option value="completed">Finalizada</option><option value="live">Ao vivo</option><option value="not_started">Não iniciada</option><option value="void">Cancelada/adiada</option></select></label>
           <button type="button" className="clear-button" onClick={() => { setFilters(emptyFilters); setPage(0) }}>Limpar filtros</button>
@@ -561,18 +601,25 @@ function App() {
         </form>
       </section>
 
-      <div className="results-line"><div className="results-meta"><span className="results-dot"/><strong>{summary}</strong>{snapshot?.generated_at && <span className="snapshot-meta">Atualizado {localDate(snapshot.generated_at)}</span>}{dataMessage && <span className="snapshot-message">{dataMessage}</span>}</div><div className="results-actions"><span>Horário local</span><button className="export-button" onClick={()=>void exportExcel()} disabled={exporting||total===0}>{exporting?'Preparando…':'⇩  Exportar Excel'}</button></div></div>
+      <div className="results-line"><div className="results-meta"><span className="results-dot"/><strong>{summary}</strong>{snapshot?.generated_at && <span className="snapshot-meta">Atualizado {localDate(snapshot.generated_at)}</span>}{dataMessage && <span className="snapshot-message">{dataMessage}</span>}<span className="snapshot-meta">Local:{filters.venue || 'todos'} Times:{selectedTeams.map(team=>team.name).join(', ') || 'todos'}</span></div><div className="results-actions"><span>Horário local</span><button className="export-button" onClick={()=>void exportExcel()} disabled={exporting||total===0}>{exporting?'Preparando…':'⇩  Exportar Excel'}</button></div></div>
 
       {error && <div className="notice error-notice" role="alert">{error}</div>}
       {loading && <div className="notice">Carregando partidas…</div>}
       {!loading && !error && matches.length === 0 && <div className="empty-state"><span className="empty-icon">⌕</span><h2>Nenhuma partida encontrada</h2><p>Tente ajustar os filtros ou importe partidas pelo backend.</p></div>}
 
       {!loading && matches.length > 0 && <section className="table-wrap" aria-label="Resultados das partidas">
-        <table className="matches-table"><thead><tr>{columns.filter(([key])=>visibleColumns.includes(key)).map(([key,label])=><th key={key} onClick={()=>{if(['date','competition','team','round','score','ord'].includes(key)){if(sortKey===key)setSortAscending(!sortAscending);else{setSortKey(key);setSortAscending(true)}}}}>{label}{['date','competition','team','round','score','ord'].includes(key)&&<span className="sort-mark">{sortKey===key?(sortAscending?'↑':'↓'):'↕'}</span>}</th>)}<th className="action-head">⋮</th></tr></thead>
-          {orderedMatches.map((match,matchIndex)=><tbody key={match.id} className="match-group">{[...match.team_statistics].sort((a,b)=>Number(b.is_home)-Number(a.is_home)).map(stat=><tr key={stat.team_id} className="team-row" onClick={()=>void openDetails(match)}>
-            {columns.filter(([key])=>visibleColumns.includes(key)).map(([key])=><td key={key} className={key==='team'?'team-cell':key==='result'||key==='halfResult'||key==='secondResult'?'result-cell':''}>{key==='ord'?page*pageSize+matchIndex+1:rowValue(match,stat,key)}</td>)}
-            <td><button className="row-details" aria-label={`Detalhes de ${stat.team_name}`} onClick={e=>{e.stopPropagation();void openDetails(match)}}>⋮</button></td>
-          </tr>)}</tbody>)}
+        <table className="matches-table"><thead><tr>{columns.filter(([key])=>visibleColumns.includes(key)).map(([key,label])=><th key={key} onClick={()=>{if(['date','competition','homeTeam','awayTeam','round','score','ord'].includes(key)){if(sortKey===key)setSortAscending(!sortAscending);else{setSortKey(key);setSortAscending(true)}}}}>{label}{['date','competition','homeTeam','awayTeam','round','score','ord'].includes(key)&&<span className="sort-mark">{sortKey===key?(sortAscending?'↑':'↓'):'↕'}</span>}</th>)}<th className="action-head">⋮</th></tr></thead>
+          {orderedMatches.map((match,matchIndex)=><tbody key={match.id} className="match-group"><tr className="match-row" onClick={()=>void openDetails(match)}>
+            {columns.filter(([key])=>visibleColumns.includes(key)).map(([key])=>{
+              const cellValue = rowValue(match, key, matchIndex)
+              const isResult = key === 'score' || key === 'halfResult' || key === 'secondResult'
+              const resultColor = (result: string) => result === 'Vitoria' ? 'result-win' : result === 'Derrota' ? 'result-loss' : result === 'Empate' ? 'result-draw' : ''
+              return <td key={key} className={`${key==='homeTeam'?'home-team-cell':key==='awayTeam'?'away-team-cell':''}${isResult?' result-pair':''}`}>
+                {isResult ? String(cellValue).split(' | ').map((result,index)=><React.Fragment key={index}>{index > 0 && <span className="result-divider"> | </span>}<span className={resultColor(result)}>{result}</span></React.Fragment>) : cellValue}
+              </td>
+            })}
+            <td><button className="row-details" aria-label={`Detalhes de ${match.home_team} contra ${match.away_team}`} onClick={e=>{e.stopPropagation();void openDetails(match)}}>⋮</button></td>
+          </tr></tbody>)}
         </table>
       </section>}
 
@@ -584,8 +631,8 @@ function App() {
 
       <section className="insights-section" aria-label="Insights dos times filtrados">
         <div className="insights-heading">
-          <div><span className="panel-kicker">LEITURA DO RECORTE</span><h2>Insights dos times</h2><p>Médias calculadas em todas as partidas filtradas; dados ausentes não entram no cálculo.</p></div>
-          <div className="insights-heading-actions"><span className="insights-sample">{filteredMatches.length} {filteredMatches.length === 1 ? 'partida na amostra' : 'partidas na amostra'}</span>{!filters.team && insightTeamCount > 8 && <button type="button" className="insights-toggle" onClick={() => setShowAllInsights(current => !current)}>{showAllInsights ? 'Mostrar menos' : 'Ver todos os times'}</button>}</div>
+          <div><span className="panel-kicker">LEITURA DO RECORTE</span><h2>Insights dos times</h2><div className="insights-explainer"><p><strong>Gols pró:</strong> média de gols marcados por jogo. <strong>Gols contra:</strong> média de gols sofridos por jogo.</p><p><strong>Escanteios, chutes e chutes no gol:</strong> médias por partida no recorte filtrado.</p><p><strong>Cartões:</strong> a média usa somente os jogos com dados disponíveis. Por exemplo, <strong>0,0 — 1/6 jogos</strong> significa que havia dados em apenas um dos seis jogos; não significa zero cartões nos outros cinco.</p><p className="insights-coverage-note">A fração abaixo de cada média mostra quantos jogos contribuíram para aquele indicador. Dados ausentes não são tratados como zero.</p></div></div>
+          <div className="insights-heading-actions"><span className="insights-sample">{filteredMatches.length} {filteredMatches.length === 1 ? 'partida na amostra' : 'partidas na amostra'}</span>{!filters.team.length && insightTeamCount > 8 && <button type="button" className="insights-toggle" onClick={() => setShowAllInsights(current => !current)}>{showAllInsights ? 'Mostrar menos' : 'Ver todos os times'}</button>}</div>
         </div>
         {teamInsights.length ? <div className="insights-grid">
           {teamInsights.map(team => <article className="insight-card" key={team.id}>

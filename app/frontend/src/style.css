@@ -149,3 +149,22 @@ footer span{padding:0 5px;color:var(--lime-dark)}
 .insights-heading-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .insights-toggle{border:1px solid #48553d;border-radius:7px;background:#1b2118;color:var(--lime);padding:7px 10px;font-size:10px;font-weight:700;cursor:pointer}
 .insights-toggle:hover{border-color:#90b952;background:#28331f}
+.match-row{cursor:pointer;background:#151915;transition:background .12s}
+.match-group:nth-of-type(even) .match-row{background:#171c17}
+.match-row:hover{background:#252d20}
+.home-team-cell{font-weight:800;color:#f1f4eb!important}
+.away-team-cell{font-weight:700;color:#c5cfb8!important}
+.home-result-cell,.away-result-cell{font-weight:800}
+.match-row .result-win{color:#8fe08f!important}
+.match-row .result-loss{color:#ff7777!important}
+.match-row .result-draw{color:#f3f5f1!important}
+.result-pair{font-weight:800;white-space:nowrap}
+.result-divider{color:#77816f;font-weight:500;padding:0 2px}
+.selected-team-chips{display:flex;flex-wrap:wrap;gap:5px;padding:4px 2px 1px}
+.selected-team-chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:4px 6px 4px 8px;border:1px solid #445339;border-radius:999px;background:#26311f;color:#dce8ce;font-size:9px;line-height:1.2}
+.selected-team-chip button{width:16px;height:16px;flex:0 0 16px;border:0;border-radius:50%;background:#39482c;color:#c6f36a;font-size:12px;line-height:1;cursor:pointer;padding:0}
+.selected-team-chip button:hover{background:#52683b;color:#fff}
+.insights-explainer{max-width:950px;margin-top:10px;color:#aeb8a4;font-size:11px;line-height:1.65}
+.insights-explainer p{margin:4px 0}
+.insights-explainer strong{color:#e5ebdc;font-weight:700}
+.insights-explainer .insights-coverage-note{color:#7f8b76;font-size:10px}
