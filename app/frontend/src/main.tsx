@@ -380,7 +380,7 @@ function App() {
       selectedMatches.forEach((match, matchIndex) => {
         const home = match.team_statistics.find(stat => stat.is_home)
         const away = match.team_statistics.find(stat => !stat.is_home)
-        const total = (homeValue: number | null | undefined, awayValue: number | null | undefined) => homeValue === null || homeValue === undefined || awayValue === null || awayValue === undefined ? null : homeValue + awayValue
+        const perTeam = (homeValue: number | null | undefined, awayValue: number | null | undefined) => `${value(homeValue)} | ${value(awayValue)}`
         const finalOutcome = resultLabel(match.home_goals, match.away_goals, match.home_team, match.away_team)
         const firstHalfOutcome = resultLabel(match.home_half_time_goals, match.away_half_time_goals, match.home_team, match.away_team)
         const secondHalfOutcome = resultLabel(match.home_second_half_goals, match.away_second_half_goals, match.home_team, match.away_team)
@@ -390,13 +390,13 @@ function App() {
           `${value(match.home_goals)} - ${value(match.away_goals)}`,
           `${value(match.home_half_time_goals)} - ${value(match.away_half_time_goals)}`, firstHalfOutcome,
           `${value(match.home_second_half_goals)} - ${value(match.away_second_half_goals)}`, secondHalfOutcome,
-          total(home?.goals, away?.goals), total(home?.half_time_goals, away?.half_time_goals), total(home?.second_half_goals, away?.second_half_goals),
-          total(home?.corners, away?.corners), total(home?.cards_total, away?.cards_total),
-          total(home?.shots, away?.shots), total(home?.shots_on_target, away?.shots_on_target),
-          total(home?.half_time_corners, away?.half_time_corners), total(home?.half_time_cards_total, away?.half_time_cards_total),
-          total(home?.half_time_shots, away?.half_time_shots), total(home?.half_time_shots_on_target, away?.half_time_shots_on_target),
-          total(home?.second_half_corners, away?.second_half_corners), total(home?.second_half_cards_total, away?.second_half_cards_total),
-          total(home?.second_half_shots, away?.second_half_shots), total(home?.second_half_shots_on_target, away?.second_half_shots_on_target),
+          perTeam(home?.goals, away?.goals), perTeam(home?.half_time_goals, away?.half_time_goals), perTeam(home?.second_half_goals, away?.second_half_goals),
+          perTeam(home?.corners, away?.corners), perTeam(home?.cards_total, away?.cards_total),
+          perTeam(home?.shots, away?.shots), perTeam(home?.shots_on_target, away?.shots_on_target),
+          perTeam(home?.half_time_corners, away?.half_time_corners), perTeam(home?.half_time_cards_total, away?.half_time_cards_total),
+          perTeam(home?.half_time_shots, away?.half_time_shots), perTeam(home?.half_time_shots_on_target, away?.half_time_shots_on_target),
+          perTeam(home?.second_half_corners, away?.second_half_corners), perTeam(home?.second_half_cards_total, away?.second_half_cards_total),
+          perTeam(home?.second_half_shots, away?.second_half_shots), perTeam(home?.second_half_shots_on_target, away?.second_half_shots_on_target),
         ])
       })
 
@@ -418,7 +418,7 @@ function App() {
     const home = match.team_statistics.find(stat => stat.is_home)
     const away = match.team_statistics.find(stat => !stat.is_home)
     const score = (homeGoals: number | null, awayGoals: number | null) => `${value(homeGoals)} - ${value(awayGoals)}`
-    const total = (homeValue: number | null | undefined, awayValue: number | null | undefined) => homeValue === null || homeValue === undefined || awayValue === null || awayValue === undefined ? '—' : homeValue + awayValue
+    const perTeam = (homeValue: number | null | undefined, awayValue: number | null | undefined) => `${value(homeValue)} | ${value(awayValue)}`
     switch (key) {
       case 'ord': return page * pageSize + matchIndex + 1
       case 'date': return localDate(match.match_date)
@@ -432,21 +432,21 @@ function App() {
       case 'halfResult': return resultLabel(match.home_half_time_goals, match.away_half_time_goals, match.home_team, match.away_team)
       case 'secondScore': return `${home?.second_half_goals ?? '—'} - ${away?.second_half_goals ?? '—'}`
       case 'secondResult': return resultLabel(match.home_second_half_goals, match.away_second_half_goals, match.home_team, match.away_team)
-      case 'goals': return total(home?.goals, away?.goals)
-      case 'halfGoals': return total(home?.half_time_goals, away?.half_time_goals)
-      case 'secondGoals': return total(home?.second_half_goals, away?.second_half_goals)
-      case 'corners': return total(home?.corners, away?.corners)
-      case 'cards': return total(home?.cards_total, away?.cards_total)
-      case 'shots': return total(home?.shots, away?.shots)
-      case 'shotsOnTarget': return total(home?.shots_on_target, away?.shots_on_target)
-      case 'halfCorners': return total(home?.half_time_corners, away?.half_time_corners)
-      case 'halfCards': return total(home?.half_time_cards_total, away?.half_time_cards_total)
-      case 'halfShots': return total(home?.half_time_shots, away?.half_time_shots)
-      case 'halfShotsOnTarget': return total(home?.half_time_shots_on_target, away?.half_time_shots_on_target)
-      case 'secondCorners': return total(home?.second_half_corners, away?.second_half_corners)
-      case 'secondCards': return total(home?.second_half_cards_total, away?.second_half_cards_total)
-      case 'secondShots': return total(home?.second_half_shots, away?.second_half_shots)
-      case 'secondShotsOnTarget': return total(home?.second_half_shots_on_target, away?.second_half_shots_on_target)
+      case 'goals': return perTeam(home?.goals, away?.goals)
+      case 'halfGoals': return perTeam(home?.half_time_goals, away?.half_time_goals)
+      case 'secondGoals': return perTeam(home?.second_half_goals, away?.second_half_goals)
+      case 'corners': return perTeam(home?.corners, away?.corners)
+      case 'cards': return perTeam(home?.cards_total, away?.cards_total)
+      case 'shots': return perTeam(home?.shots, away?.shots)
+      case 'shotsOnTarget': return perTeam(home?.shots_on_target, away?.shots_on_target)
+      case 'halfCorners': return perTeam(home?.half_time_corners, away?.half_time_corners)
+      case 'halfCards': return perTeam(home?.half_time_cards_total, away?.half_time_cards_total)
+      case 'halfShots': return perTeam(home?.half_time_shots, away?.half_time_shots)
+      case 'halfShotsOnTarget': return perTeam(home?.half_time_shots_on_target, away?.half_time_shots_on_target)
+      case 'secondCorners': return perTeam(home?.second_half_corners, away?.second_half_corners)
+      case 'secondCards': return perTeam(home?.second_half_cards_total, away?.second_half_cards_total)
+      case 'secondShots': return perTeam(home?.second_half_shots, away?.second_half_shots)
+      case 'secondShotsOnTarget': return perTeam(home?.second_half_shots_on_target, away?.second_half_shots_on_target)
     }
   }
 
