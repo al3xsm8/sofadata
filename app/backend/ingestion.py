@@ -166,9 +166,9 @@ def import_event(session: Session, event: dict[str, Any], slices: dict[str, Any]
         stat_values[True][f"second_half_{field}"] = home_second
         stat_values[False][f"second_half_{field}"] = away_second
 
-    # The source reports yellow and red cards as separate team totals for each
-    # period. Only sum when both are present so a partial response is not
-    # mistaken for a complete card count.
+    # The source reports yellow and red cards separately. When at least one
+    # card category exists for a period, treat an omitted category as zero;
+    # if neither category exists, keep the total unavailable.
     for period_name, field in (
         ("ALL", "cards_total"),
         ("1ST", "half_time_cards_total"),
@@ -180,7 +180,7 @@ def import_event(session: Session, event: dict[str, Any], slices: dict[str, Any]
             (True, home_yellow, home_red),
             (False, away_yellow, away_red),
         ):
-            stat_values[is_home][field] = yellow + red if yellow is not None and red is not None else None
+            stat_values[is_home][field] = (yellow or 0) + (red or 0) if yellow is not None or red is not None else None
 
     for is_home, team in ((True, home_team), (False, away_team)):
         row = session.scalar(

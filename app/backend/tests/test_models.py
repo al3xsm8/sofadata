@@ -167,13 +167,22 @@ def test_missing_statistics_remain_null(session: Session) -> None:
     assert all(row.cards_total is None for row in rows)
 
 
-def test_partial_card_statistics_remain_null(session: Session) -> None:
+def test_missing_red_card_stat_counts_reported_yellow_cards(session: Session) -> None:
     slices = _sample_slices()
     for period in slices["statistics"]["statistics"]:
         for group in period["groups"]:
             group["statisticsItems"] = [
                 item for item in group["statisticsItems"] if item.get("key") != "redCards"
             ]
+    import_event(session, _sample_event(), slices)
+    session.commit()
+    rows = session.query(TeamMatchStatistics).all()
+    assert {row.is_home: row.cards_total for row in rows} == {True: 2, False: 1}
+    assert {row.is_home: row.half_time_cards_total for row in rows} == {True: 1, False: 0}
+
+
+def test_missing_all_card_statistics_remain_null(session: Session) -> None:
+    slices = _sample_slices(include_cards=False)
     import_event(session, _sample_event(), slices)
     session.commit()
     assert all(row.cards_total is None for row in session.query(TeamMatchStatistics).all())
